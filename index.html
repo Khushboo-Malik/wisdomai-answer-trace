@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Answer Trace: a concept by Khushboo Malik for WisdomAI</title>
+<style>
+  :root{--bg:#faf9f7;--card:#fff;--line:#e7e3dc;--txt:#1f1d1a;--mut:#77716a;--acc:#5b4bd6;--ok:#2e8b57;--warn:#c47f17;--bad:#c94444}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--txt)}
+  header{padding:20px 24px;border-bottom:1px solid var(--line);background:var(--card)}
+  header h1{margin:0;font-size:20px}
+  header p{margin:6px 0 0;color:var(--mut);font-size:13px;max-width:780px;line-height:1.5}
+  .note{font-size:13px;line-height:1.55;max-width:780px;margin-top:10px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .tag{display:inline-block;font-size:11px;padding:2px 8px;border:1px solid var(--line);border-radius:99px;color:var(--mut);margin-top:8px}
+  main{max-width:1080px;margin:0 auto;padding:20px 24px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:900px){main{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .card h2{margin:0 0 10px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--acc)}
+  .qs{display:flex;flex-wrap:wrap;gap:8px;grid-column:1/-1}
+  .q{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:8px 14px;cursor:pointer;font-size:13px}
+  .q.on{border-color:var(--acc);color:var(--acc);background:#f1efff}
+  .answer{font-size:15px;line-height:1.55}
+  .answer b{font-size:22px}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 10px;border-radius:99px;margin:8px 6px 0 0;border:1px solid var(--line)}
+  .dot{width:8px;height:8px;border-radius:50%}
+  pre{background:#16151f;color:#e6e1ff;border-radius:8px;padding:12px;font-size:12px;overflow:auto;line-height:1.5;margin:0}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td,th{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left}
+  th{color:var(--mut);font-weight:500}
+  .meter{height:8px;background:var(--bg);border-radius:4px;overflow:hidden;margin:4px 0 10px}
+  .meter div{height:100%}
+  .warnbox{background:#fff6e8;border:1px solid #f0d7a8;border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.5;margin-top:10px}
+  footer{padding:12px 24px;color:var(--mut);font-size:12px;max-width:1080px;margin:0 auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>Answer Trace</h1>
+  <p>Next to every AI-generated answer: the SQL that produced it, which tables it read, how fresh each table is, and what the query cost. If a source is stale, the answer says so before anyone pastes it into a deck.</p>
+  <div class="note">I was exploring what the WisdomAI team is building and kept thinking about the platform side: when an exec asks a question in plain English, how do they know the number is current? So I tried a quick prototype of a trace panel that shows freshness, cost and cache status for each answer. It runs on sample data. - Khushboo</div>
+  <span class="tag">Unofficial concept by Khushboo Malik · sample data only · not affiliated with WisdomAI</span>
+</header>
+<main>
+  <div class="qs" id="qs"></div>
+  <section class="card">
+    <h2>Answer</h2>
+    <div id="ans" class="answer"></div>
+    <div id="badges"></div>
+    <div id="warn"></div>
+  </section>
+  <section class="card">
+    <h2>Generated SQL</h2>
+    <pre id="sql"></pre>
+  </section>
+  <section class="card">
+    <h2>Sources and freshness</h2>
+    <table><thead><tr><th>Table</th><th>Last loaded</th><th>SLA</th><th>Status</th></tr></thead><tbody id="src"></tbody></table>
+  </section>
+  <section class="card">
+    <h2>Cost and cache</h2>
+    <div style="font-size:13px">Warehouse scan</div><div class="meter"><div id="scanbar" style="background:var(--acc)"></div></div>
+    <div style="font-size:13px">Tenant daily budget used</div><div class="meter"><div id="budbar"></div></div>
+    <div id="costtxt" style="font-size:13px;color:var(--mut);line-height:1.6"></div>
+  </section>
+</main>
+<footer>Plain HTML + JS. Questions, SQL, table timestamps and costs are made up. "Now" is fixed at 25 Nov 2026, 18:00 IST for the demo.</footer>
+<script>
+const NOW=new Date("2026-11-25T18:00:00+05:30");
+const tables={
+ "sales.orders":{loaded:"2026-11-25T17:40:00+05:30",sla:60},
+ "sales.refunds":{loaded:"2026-11-25T09:05:00+05:30",sla:120},
+ "crm.accounts":{loaded:"2026-11-25T06:00:00+05:30",sla:1440},
+ "marketing.spend":{loaded:"2026-11-23T23:00:00+05:30",sla:1440},
+};
+const qs=[
+ {q:"What was net revenue last week?",a:"Net revenue last week was <b>₹4.82 Cr</b>, up 6.1% week on week.",
+  sql:"SELECT SUM(o.amount) - COALESCE(SUM(r.amount),0) AS net_revenue\nFROM sales.orders o\nLEFT JOIN sales.refunds r ON r.order_id = o.id\nWHERE o.created_at >= DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '7 day'\n  AND o.created_at <  DATE_TRUNC('week', CURRENT_DATE);",
+  src:["sales.orders","sales.refunds"],scanGB:3.4,cache:false,conf:0.92},
+ {q:"Which region has the highest CAC this month?",a:"<b>North</b> has the highest CAC this month at ₹2,140 per new account.",
+  sql:"SELECT a.region, SUM(m.amount) / NULLIF(COUNT(DISTINCT a.id),0) AS cac\nFROM marketing.spend m\nJOIN crm.accounts a ON a.region = m.region\nWHERE a.created_at >= DATE_TRUNC('month', CURRENT_DATE)\nGROUP BY a.region\nORDER BY cac DESC\nLIMIT 1;",
+  src:["marketing.spend","crm.accounts"],scanGB:11.8,cache:false,conf:0.71},
+ {q:"How many new accounts today?",a:"<b>318</b> new accounts were created today.",
+  sql:"SELECT COUNT(*) AS new_accounts\nFROM crm.accounts\nWHERE created_at::date = CURRENT_DATE;",
+  src:["crm.accounts"],scanGB:0.2,cache:true,conf:0.88},
+];
+let budgetUsed=61; // % of tenant's daily scan budget already used
+function ageMin(t){return Math.round((NOW-new Date(tables[t].loaded))/60000)}
+function human(m){return m<60?m+" min ago":m<1440?Math.round(m/60)+" h ago":Math.round(m/1440)+" d ago"}
+function show(i){
+  const x=qs[i];
+  document.querySelectorAll(".q").forEach((b,j)=>b.classList.toggle("on",i==j));
+  document.getElementById("ans").innerHTML=x.a;
+  document.getElementById("sql").textContent=x.sql;
+  const rows=x.src.map(t=>{const m=ageMin(t),st=m>tables[t].sla*2?"stale":m>tables[t].sla?"late":"fresh";return {t,m,st}});
+  document.getElementById("src").innerHTML=rows.map(r=>`<tr><td>${r.t}</td><td>${human(r.m)}</td><td>${tables[r.t].sla>=1440?"daily":tables[r.t].sla+" min"}</td><td style="color:${r.st=="fresh"?"var(--ok)":r.st=="late"?"var(--warn)":"var(--bad)"};font-weight:600">${r.st}</td></tr>`).join("");
+  const worst=rows.some(r=>r.st=="stale")?"stale":rows.some(r=>r.st=="late")?"late":"fresh";
+  const col={fresh:"var(--ok)",late:"var(--warn)",stale:"var(--bad)"}[worst];
+  const cost=(x.scanGB*0.42).toFixed(2);
+  document.getElementById("badges").innerHTML=`<span class="badge"><span class="dot" style="background:${col}"></span>Data ${worst}</span><span class="badge">Confidence ${Math.round(x.conf*100)}%</span><span class="badge">${x.cache?"Served from cache":"Live query"}</span>`;
+  const stale=rows.filter(r=>r.st!="fresh");
+  document.getElementById("warn").innerHTML=stale.length?`<div class="warnbox"><b>Heads up:</b> ${stale.map(r=>`${r.t} was last loaded ${human(r.m)} (expected every ${tables[r.t].sla>=1440?"day":tables[r.t].sla+" min"})`).join("; ")}. This answer may not include the latest data.</div>`:"";
+  const scanPct=Math.min(100,x.scanGB/15*100), add=x.cache?0:x.scanGB/40*100, bud=Math.min(100,budgetUsed+add);
+  document.getElementById("scanbar").style.width=scanPct+"%";
+  const bb=document.getElementById("budbar"); bb.style.width=bud+"%"; bb.style.background=bud>85?"var(--bad)":bud>70?"var(--warn)":"var(--ok)";
+  document.getElementById("costtxt").innerHTML=`${x.cache?"0 GB scanned (cache hit)":x.scanGB+" GB scanned · ~$"+cost}<br>Tenant budget after this query: ${Math.round(bud)}% of 40 GB/day${bud>85?" · next heavy questions would be queued or served from cache":""}`;
+}
+document.getElementById("qs").innerHTML=qs.map((x,i)=>`<button class="q" onclick="show(${i})">${x.q}</button>`).join("");
+show(0);
+</script>
+</body>
+</html>
